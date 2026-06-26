@@ -1,79 +1,76 @@
-use chrono::Local;
-use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
+mod app;
+mod command;
+mod storage;
 
-fn handle_cmd(cmd: &str, history: &mut Vec<(String, String)>)
-{
-    match cmd
-    {
-        "/clear" => history.clear(),
-        "/history" =>
-        {
-            for (i, (timestamp, line)) in history.iter().enumerate()
-            {
-                println!("{}: [{}] {}", i+1, timestamp, line);
-            }
-        }
-        "/help" =>
-        {
-            println!("commands: /clear, /history, /help, /quit");
-        }
-        "/quit" =>
-        {
-            println!("goodbye");
-            std::process::exit(0);
-        }
-        _ => println!("unknown command: {}", cmd),
-    }
-}
+use app::App;
+use crossterm::{
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+};
+use ratatui::{
+    backend::CrosstermBackend,
+    layout::{Constraint, Direction, Layout},
+    widgets::{Block, Borders, List, ListItem, Paragraph},
+    Terminal,
+};
+use std::io;
 
-fn load_history() -> Vec<(String, String)>
+fn main() -> io::Result<()>
 {
-    fs::read_to_string("history.txt")
-        .unwrap_or_default()
-        .lines()
-        .filter_map(|l| 
-            {
-                let mut parts = l.splitn(2, '|');
-                Some((parts.next()?.to_string(), parts.next()?.to_string()))
-            })
-        .collect()
-}
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen)?;
 
-fn save_line(timestamp: &str, line: &str)
-{
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("history.txt")
-        .unwrap();
-    writeln!(file, "{}|{}", timestamp, line).unwrap();
-}
-
-fn main()
-{
-    let mut history = load_history();
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+    let mut app = App::new();
 
     loop
     {
-        print!("~|> ");
-        io::stdout().flush().unwrap();
-
-        let mut input = String::new();
-        io::stdin().read_line(&mut input).unwrap();
-
-        let input = input.trim();
-
-        if input.starts_with('/')
+        terminal.draw(|frame|
         {
-            handle_cmd(input, &mut history);
-            continue;
-        }
-        else
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(1), Constraint::Length(3)])
+                .split(frame.area());
+            
+            let items: Vec<ListItem> = app.output.iter()
+                .map(|m| ListItem::new(m.as_str()))
+                .collect();
+            
+            let list = List::new(items)
+                .block(Block::default().borders(Borders::ALL).title(" output "));
+
+            let input = Paragraph::new(app.input.as_str())
+                .block(Block::default().borders(Borders::ALL).title(" >> "));
+            
+            frame.render_widget(list, chunks[0]);
+            frame.render_widget(input, chunks[1]);
+            frame.set_cursor_position((
+                chunks[1].x + app.input.len() as u16 + 1,
+                chunks[1].y + 1,
+            ));
+        })?;
+
+        if let Event::Key(key) = event::read()? 
         {
-            let timestamp = Local::now().format("%H:%M:%S").to_string();
-            history.push((timestamp.clone(), input.to_string()));
-            save_line(&timestamp, input);
-        }
+            if key.kind == KeyEventKind::Press
+            {
+                match (key.code, key.modifiers)
+                {
+                    (KeyCode::Char('c'), KeyModifiers::CONTROL) => break,
+                    (KeyCode::Char('l'), KeyModifiers::CONTROL) => app.output.clear(),
+                    (KeyCode::Enter, _) => { if app.submit() { break; } },
+                    (KeyCode::Backspace, _) => { app.input.pop(); },
+                    (KeyCode::Char(c), _) => app.input.push(c),
+                    _ => {}
+                }
+            }
+        } 
     }
+
+    disable_raw_mode()?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    Ok(())
 }
