@@ -34,7 +34,7 @@ fn main() -> io::Result<()>
                 .direction(Direction::Vertical)
                 .constraints([Constraint::Min(1), Constraint::Length(3)])
                 .split(frame.area());
-            
+
             let items: Vec<ListItem> = app.output.iter()
                 .map(|m| ListItem::new(m.as_str()))
                 .collect();
@@ -59,6 +59,8 @@ fn main() -> io::Result<()>
             {
                 match (key.code, key.modifiers)
                 {
+                    (KeyCode::Up, _) => app.history_up(),
+                    (KeyCode::Down, _) => app.history_down(),
                     (KeyCode::Char('c'), KeyModifiers::CONTROL) => break,
                     (KeyCode::Char('l'), KeyModifiers::CONTROL) => app.output.clear(),
                     (KeyCode::Enter, _) => { if app.submit() { break; } },
